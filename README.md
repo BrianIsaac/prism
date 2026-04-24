@@ -6,8 +6,7 @@ belt**, and the **same frozen scoring harness**. The only variable is
 the model — provider diversity supplies the differentiation.
 
 Built solo for the GrabMaps API Hackathon, 2026-04-24, 3 Media Circle,
-Singapore. Submitted to the **Discover the City** track with the
-**Best Bug Hunter** report as a side-quest artefact.
+Singapore. Submitted to the **Discover the City** track.
 
 > "Three minds, one city, refracted into three coloured plans on the
 > same canvas — driven by live Grab traffic, live incidents, real
@@ -47,7 +46,7 @@ grounded vibe). Humans rate the winner and the rating **drifts the
 harness weights** by α = 0.02 — a slow, auditable Bayesian update of
 what *this room's* taste of a good trip looks like.
 
-The product is three things at once:
+The product is two things at once:
 
 - **A real-time agentic benchmark.** Opus, GPT, Gemini race across a
   live map for 60–120 seconds. Their tool-call volume, timing, and
@@ -56,9 +55,6 @@ The product is three things at once:
 - **A city-discovery tool.** Every race leaves behind a validated plan
   that pins to a globe. Over time the globe accumulates a taste-weighted
   index of the city.
-- **A Bug Hunter report.** Every failing GrabMaps call lands in an
-  aggregated trace with a reproduction payload, rendered as Markdown in
-  the admin dashboard. Two prize tracks, one codebase.
 
 ### Live-only, no mocks
 
@@ -152,7 +148,7 @@ each agent gets up to three passes at a good plan.
 │  app/tools/base.py   budget + trace + SSE emission chokepoint    │
 │  app/storage.py      aiosqlite — 11 tables                       │
 │  app/feedback_kb.py  LLM-Wiki pattern (Haiku rebuilds digest)    │
-│  app/trace_export.py Bug Hunter Markdown report                  │
+│  app/trace_export.py Failing-tool-call Markdown report           │
 └────────────┬─────────────────────────────────────────────────────┘
              │ HTTPS
              ▼
@@ -399,7 +395,7 @@ Every tool call is wrapped by `call_tool_with_budget` which:
 1. Enforces the per-agent budget (`Budget.remaining`)
 2. Emits `tool_call` with `payload.lat/lng` when extractable
 3. Times the call, catches every exception
-4. Writes a `ToolTrace` row to SQLite (feeds Bug Hunter + admin live feed)
+4. Writes a `ToolTrace` row to SQLite (feeds the admin live feed + failure report)
 5. Emits `tool_result` with a short summary + street-view thumbnail
 
 ---
@@ -537,7 +533,7 @@ prism/
 │   │   ├── config.py               # env-driven knobs
 │   │   ├── storage.py              # aiosqlite persistence (11 tables)
 │   │   ├── feedback_kb.py          # Haiku digest rebuild
-│   │   ├── trace_export.py         # Bug Hunter Markdown
+│   │   ├── trace_export.py         # failing-tool-call aggregation + Markdown
 │   │   ├── llm_clients.py          # Anthropic + OpenAI + Google GenAI
 │   │   ├── agents/
 │   │   │   ├── base.py             # shared tool-use loop + ratchet

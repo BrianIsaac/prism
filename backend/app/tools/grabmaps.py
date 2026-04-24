@@ -2,8 +2,9 @@
 
 All five wrappers issue **real** HTTP requests against the GrabMaps proxy at
 :data:`app.config.GRABMAPS_BASE_URL` with a ``Bearer`` token. There is no
-mock branch and no fixture fallback — Prism v2 is live-only and failures
-surface as real Bug Hunter entries.
+mock branch and no fixture fallback — Prism v2 is live-only and every
+failure surfaces in the admin ``/admin/bug-report`` aggregate so the
+operator can see which endpoints are regressing in real time.
 
 Endpoint mapping:
     - ``places_search``   -> GET ``/api/v1/maps/poi/v1/search``

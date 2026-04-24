@@ -238,9 +238,10 @@ async def call_tool_with_budget(
         return {"ok": True}
 
     if budget.remaining <= 0:
-        # Record the budget-exhaustion so the Bug Hunter artefact surfaces the
-        # most common agent failure mode. Without this, the exception would
-        # pre-empt the trace write and the report would under-count exhaustions.
+        # Record the budget-exhaustion so the admin failure report surfaces
+        # the most common agent failure mode. Without this, the exception
+        # would pre-empt the trace write and the report would under-count
+        # exhaustions.
         from app.storage import insert_traces
 
         trace = ToolTrace(

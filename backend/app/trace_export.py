@@ -1,15 +1,15 @@
-"""Trace aggregation and bug-report export for the Best Bug Hunter artefact.
+"""Trace aggregation and failing-tool-call report.
 
-Groups every failing tool-call row by ``tool_name`` and ``status``, samples a
-handful of reproduction cases, and renders the result as both a structured
-:class:`BugReport` dataclass and a one-page Markdown string. On event day this
-is the artefact handed to Grab engineers alongside the demo.
+Groups every failing tool-call row by ``tool_name`` and ``status``, samples
+a handful of reproduction cases, and renders the result as both a
+structured :class:`BugReport` dataclass and a one-page Markdown string.
+Powers the admin dashboard's ``/admin/bug-report`` surface so the
+operator can see which GrabMaps endpoints are regressing in real time
+and hand the Markdown export to an engineer for reproduction.
 
-Reads directly from the ``traces`` SQLite table via :mod:`aiosqlite` instead
-of going through :mod:`app.storage` so this Phase 3 module stays self-
-contained — Phase 1 owns the storage helpers and has not yet exposed a
-``fetch_all_traces`` convenience. A single ``SELECT * FROM traces`` here
-is cheaper than cross-shard churn.
+Reads directly from the ``traces`` SQLite table via :mod:`aiosqlite`
+instead of going through :mod:`app.storage` — a single
+``SELECT * FROM traces`` here is cheaper than cross-shard churn.
 """
 
 from __future__ import annotations
