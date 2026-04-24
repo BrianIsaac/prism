@@ -571,10 +571,14 @@ def _parse_plan(
                 agent, f"unparseable final output: {content[:200]}"
             )
 
+    # ``isinstance`` filter: a hallucinated nested-list ``pois`` shape would
+    # otherwise raise ``AttributeError: 'list' object has no attribute
+    # 'get'`` on the fabrication check.
     fabricated = [
         poi.get("name", str(poi.get("id", "?")))
-        for poi in plan.get("pois", [])
-        if not poi.get("id") or poi.get("id") not in seen_poi_ids
+        for poi in (plan.get("pois") or [])
+        if isinstance(poi, dict)
+        and (not poi.get("id") or poi.get("id") not in seen_poi_ids)
     ]
     if fabricated:
         return _failed_plan(

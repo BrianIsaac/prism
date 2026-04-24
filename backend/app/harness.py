@@ -505,6 +505,8 @@ def _window_within_hours(
 
     weekday = start.strftime("%A").lower()
     for entry in opening_hours:
+        if not isinstance(entry, dict):
+            continue
         day = str(entry.get("day", "")).lower()
         if day != weekday:
             continue

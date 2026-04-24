@@ -75,6 +75,10 @@ async def judge_vibe(
     flake propagate through the aggregate score.
     """
     spec_dict = _spec_to_dict(spec)
+    # ``isinstance`` filter matches the harness hardening — a stray list
+    # element inside ``pois`` (from a hallucinated nested-list schema
+    # variant) would otherwise raise ``AttributeError: 'list' object has
+    # no attribute 'get'`` and crash the whole race's scoring pass.
     pois_summary = [
         {
             "id": p.get("id"),
@@ -83,7 +87,8 @@ async def judge_vibe(
             "description": (p.get("description") or "")[:200],
             "tags": (p.get("tags") or [])[:6],
         }
-        for p in plan.get("pois", [])
+        for p in (plan.get("pois") or [])
+        if isinstance(p, dict)
     ]
     payload_text = json.dumps(
         {
