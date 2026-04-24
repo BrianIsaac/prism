@@ -1,0 +1,208 @@
+{
+  "captured_at": "2026-04-24",
+  "source": "mcp__grab-maps-playground__discover_api_endpoints (no filter)",
+  "note": "Live surface snapshot documenting the 19-endpoint proxy. Documentation only — /prism/ does not read this at runtime. Every tool wrapper issues real HTTP calls against maps.grab.com.",
+  "endpoints": [
+    {
+      "category": "search",
+      "description": "Keyword POI search (no server-side radius/category/bounds)",
+      "endpoint": "/api/v1/maps/poi/v1/search",
+      "example": "/api/v1/maps/poi/v1/search?keyword=Marina+Bay&country=SGP&location=1.3521,103.8198&limit=10",
+      "method": "GET",
+      "query_params": ["keyword", "country", "location", "limit"],
+      "upstream": "https://partner-api.grab.com/maps/poi/v1/search"
+    },
+    {
+      "category": "search",
+      "description": "Short-keyword POI autocomplete (debounce on client)",
+      "endpoint": "/api/v1/maps/poi/v1/autocomplete",
+      "example": "/api/v1/maps/poi/v1/autocomplete?keyword=mar&country=SGP",
+      "method": "GET",
+      "query_params": ["keyword", "country", "location", "limit"],
+      "upstream": "https://partner-api.grab.com/maps/poi/v1/autocomplete"
+    },
+    {
+      "category": "search",
+      "description": "Reverse geocode (location as lat,lng)",
+      "endpoint": "/api/v1/maps/poi/v1/reverse-geo",
+      "example": "/api/v1/maps/poi/v1/reverse-geo?location=1.3521,103.8198",
+      "method": "GET",
+      "query_params": ["location"],
+      "upstream": "https://partner-api.grab.com/maps/poi/v1/reverse-geo"
+    },
+    {
+      "category": "search",
+      "description": "Find Nearby Places V2 (radius in kilometres)",
+      "endpoint": "/api/v1/maps/place/v2/nearby",
+      "example": "/api/v1/maps/place/v2/nearby?location=1.3521,103.8198&radius=1&limit=10&rankBy=distance",
+      "method": "GET",
+      "query_params": ["location", "radius", "limit", "rankBy", "language"],
+      "upstream": "https://partner-api.grab.com/maps/place/v2/nearby"
+    },
+    {
+      "category": "routing",
+      "description": "Route geometry for maps (polyline, legs, distance, duration); default coords lng,lat — use lat_first=true for lat,lng",
+      "endpoint": "/api/v1/maps/eta/v1/direction",
+      "example": "/api/v1/maps/eta/v1/direction?coordinates=103.8198,1.3521&coordinates=103.8501,1.2897&profile=driving&lat_first=false",
+      "method": "GET",
+      "query_params": ["coordinates", "profile", "lat_first", "overview", "geometries", "steps"],
+      "upstream": "https://partner-api.grab.com/maps/eta/v1/direction"
+    },
+    {
+      "category": "routing",
+      "description": "Turn-by-turn / voice-oriented navigation (not the primary choice for map line geometry)",
+      "endpoint": "/api/v1/maps/eta/v1/navigation",
+      "example": "/api/v1/maps/eta/v1/navigation?coordinates=1.3521,103.8198&coordinates=1.2897,103.8501&profile=driving-car&lat_first=true",
+      "method": "GET",
+      "query_params": ["coordinates", "profile", "lat_first"],
+      "upstream": "https://partner-api.grab.com/maps/eta/v1/navigation"
+    },
+    {
+      "category": "traffic",
+      "description": "Real-time traffic by bounding box",
+      "endpoint": "/api/v1/traffic/real-time/bbox",
+      "example": "/api/v1/traffic/real-time/bbox?lat1=1.4&lat2=1.2&lon1=103.6&lon2=104.0&linkReference=GRAB_WAY",
+      "method": "GET",
+      "note": "Our API also accepts bbox parameter (bbox=minLng,minLat,maxLng,maxLat) as convenience, which is converted to lat1/lat2/lon1/lon2 format internally.",
+      "query_params": ["lat1", "lat2", "lon1", "lon2", "linkReference", "roadClass", "congestion"],
+      "upstream": "https://partner-api.grab.com/maps/traffic/v1/real-time/bbox"
+    },
+    {
+      "category": "traffic",
+      "description": "Real-time traffic by tile coordinates",
+      "endpoint": "/api/v1/traffic/real-time/tile",
+      "example": "/api/v1/traffic/real-time/tile?x=12916&y=8133&z=14",
+      "method": "GET",
+      "query_params": ["x", "y", "z"],
+      "upstream": "https://partner-api.grab.com/maps/traffic/v1/real-time/tile"
+    },
+    {
+      "category": "traffic",
+      "description": "Real-time traffic by radius/circle",
+      "endpoint": "/api/v1/traffic/real-time/circle",
+      "example": "/api/v1/traffic/real-time/circle?lat=1.3521&lng=103.8198&radius=1000",
+      "method": "GET",
+      "query_params": ["lat", "lng", "radius"],
+      "upstream": "https://partner-api.grab.com/maps/traffic/v1/real-time/circle"
+    },
+    {
+      "category": "traffic",
+      "description": "Traffic data for a specific map tile",
+      "endpoint": "/api/v1/traffic-tiles/{z}/{x}/{y}.json",
+      "example": "/api/v1/traffic-tiles/14/12345/6789.json",
+      "method": "GET",
+      "note": "Returns GeoJSON FeatureCollection with traffic features. Requires API key authentication.",
+      "query_params": ["z", "x", "y"],
+      "upstream": "BragMaps internal"
+    },
+    {
+      "category": "traffic",
+      "description": "Traffic incidents by bounding box",
+      "endpoint": "/api/v1/traffic/incidents/bbox",
+      "example": "/api/v1/traffic/incidents/bbox?bbox=103.6,1.2,104.0,1.4&linkReference=GRAB_WAY",
+      "method": "GET",
+      "note": "Gateway accepts bbox=minLng,minLat,maxLng,maxLat; linkReference=GRAB_WAY is often required. Keep bbox small (~=0.044 per side) to avoid 400.",
+      "query_params": ["bbox", "lat1", "lat2", "lon1", "lon2", "linkReference", "incident_types", "severity_levels"],
+      "upstream": "https://partner-api.grab.com/maps/traffic/v1/incidents/bbox"
+    },
+    {
+      "category": "traffic",
+      "description": "Traffic incidents by tile coordinates",
+      "endpoint": "/api/v1/traffic/incidents/tile",
+      "example": "/api/v1/traffic/incidents/tile?x=12916&y=8133&z=14",
+      "method": "GET",
+      "query_params": ["x", "y", "z"],
+      "upstream": "https://partner-api.grab.com/maps/traffic/v1/incidents/tile"
+    },
+    {
+      "category": "traffic",
+      "description": "Traffic incidents by radius/circle",
+      "endpoint": "/api/v1/traffic/incidents/circle",
+      "example": "/api/v1/traffic/incidents/circle?lat=1.3521&lng=103.8198&radius=1000",
+      "method": "GET",
+      "query_params": ["lat", "lng", "radius"],
+      "upstream": "https://partner-api.grab.com/maps/traffic/v1/incidents/circle"
+    },
+    {
+      "category": "streetview",
+      "description": "Street-level imagery and 360 panoramas",
+      "endpoint": "/api/v1/openstreetcam-api/2.0/photo/",
+      "example": "/api/v1/openstreetcam-api/2.0/photo/?lat=1.3521&lng=103.8198&radius=100&limit=10&projection=SPHERE",
+      "method": "GET",
+      "query_params": ["lat", "lng", "radius", "limit", "orderBy", "orderDirection", "projection"],
+      "upstream": "https://api.openstreetcam.org/2.0/photo/"
+    },
+    {
+      "category": "streetview",
+      "description": "Street photos by bounding box",
+      "endpoint": "/api/v1/openstreetcam-api/photos",
+      "example": "/api/v1/openstreetcam-api/photos?bbox=103.83,1.30,103.85,1.32&limit=50",
+      "method": "GET",
+      "query_params": ["bbox", "limit"],
+      "upstream": "https://api.openstreetcam.org/photos"
+    },
+    {
+      "category": "style",
+      "description": "MapLibre style JSON (common path relative to API origin)",
+      "endpoint": "/api/style.json",
+      "example": "/api/style.json",
+      "method": "GET",
+      "note": "Theme may be expressed as query params depending on deployment.",
+      "query_params": ["basic", "dark", "satellite"],
+      "upstream": "Varies by deployment"
+    },
+    {
+      "category": "style",
+      "description": "Map style JSON (BragMaps proxy path)",
+      "endpoint": "/api/v1/api/style.json",
+      "example": "/api/v1/api/style.json",
+      "method": "GET",
+      "query_params": [],
+      "upstream": "Varies by deployment"
+    },
+    {
+      "category": "auth",
+      "description": "OAuth2 authentication token",
+      "endpoint": "/api/v1/grabid/v1/oauth2/token",
+      "example": "/api/v1/grabid/v1/oauth2/token",
+      "method": "POST",
+      "query_params": [],
+      "upstream": "https://partner-api.grab.com/grabid/v1/oauth2/token"
+    },
+    {
+      "category": "search",
+      "description": "Nearby places search (Grab Places API)",
+      "endpoint": "/api/v1/grabplaces/nearby",
+      "example": "/api/v1/grabplaces/nearby",
+      "method": "POST",
+      "note": "Requires POST body with JSON: {\"latitude\": 1.3521, \"longitude\": 103.8198, \"radius\": 1000, \"keyword\": \"restaurant\"}",
+      "query_params": [],
+      "upstream": "https://grab-places.stg-myteksi.com/grabplaces/nearby"
+    }
+  ],
+  "endpoint_count": 19,
+  "prism_v2_tool_belt": [
+    {"tool": "places_search", "endpoint": "/api/v1/maps/poi/v1/search", "file": "grabmaps.py"},
+    {"tool": "nearby_search", "endpoint": "/api/v1/maps/place/v2/nearby", "file": "grabmaps.py"},
+    {"tool": "reverse_geocode", "endpoint": "/api/v1/maps/poi/v1/reverse-geo", "file": "grabmaps.py"},
+    {"tool": "route", "endpoint": "/api/v1/maps/eta/v1/direction", "file": "grabmaps.py"},
+    {"tool": "route_matrix", "endpoint": "composite (N*M /direction calls)", "file": "grabmaps.py"},
+    {"tool": "get_traffic", "endpoint": "/api/v1/traffic/real-time/circle", "file": "live.py"},
+    {"tool": "get_incidents", "endpoint": "/api/v1/traffic/incidents/circle", "file": "live.py"},
+    {"tool": "get_street_view", "endpoint": "/api/v1/openstreetcam-api/2.0/photo/", "file": "live.py"}
+  ],
+  "endpoints_unused_by_tool_belt": [
+    "/api/v1/maps/poi/v1/autocomplete",
+    "/api/v1/maps/eta/v1/navigation",
+    "/api/v1/traffic/real-time/bbox",
+    "/api/v1/traffic/real-time/tile",
+    "/api/v1/traffic-tiles/{z}/{x}/{y}.json",
+    "/api/v1/traffic/incidents/bbox",
+    "/api/v1/traffic/incidents/tile",
+    "/api/v1/openstreetcam-api/photos",
+    "/api/style.json",
+    "/api/v1/api/style.json",
+    "/api/v1/grabid/v1/oauth2/token",
+    "/api/v1/grabplaces/nearby"
+  ]
+}
