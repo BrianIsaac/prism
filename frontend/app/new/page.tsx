@@ -1,22 +1,26 @@
+"use client";
+
+import nextDynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useCallback } from "react";
+
+// Phase 0's `lib/api-client` eagerly imports `eventsource-polyfill`, which
+// touches `window` at module scope. The race shell consumes that module so
+// we defer its mount through `next/dynamic` with `ssr: false`: the polyfill
+// never lands in the server bundle, which keeps `next build`'s prerender
+// worker happy while still hydrating the full SSE orchestrator on the
+// client. The shell opens the stream via `openRaceStream` from
+// lib/api-client; this page owns the rate-to-Explore navigation by calling
+// `router.push('/')` through the shell's `onRated` callback.
+const NewRouteShell = nextDynamic(
+  () => import("./new-route-shell").then((m) => m.NewRouteShell),
+  { ssr: false },
+);
+
 export default function NewRoutePage() {
-  return (
-    <main className="h-full w-full flex items-center justify-center px-6">
-      <section className="max-w-xl rounded-lg border border-white/10 bg-black/60 backdrop-blur p-8 animate-fade-in-up">
-        <p className="text-xs uppercase tracking-[0.2em] text-grab-green/80">
-          New Route
-        </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">
-          Structured race form
-        </h1>
-        <p className="mt-4 text-sm leading-relaxed text-white/70">
-          Type a natural-language query and the spec parser converts it into a
-          budget + duration + transport-mode + dietary override. Three agents race
-          on the same structured spec.
-        </p>
-        <p className="mt-6 text-xs text-white/40">
-          Form + agent race panel arrive in Phase 5.
-        </p>
-      </section>
-    </main>
-  );
+  const router = useRouter();
+  const handleRated = useCallback(() => {
+    router.push('/');
+  }, [router]);
+  return <NewRouteShell onRated={handleRated} />;
 }
