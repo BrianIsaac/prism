@@ -92,8 +92,12 @@ def check_hard_rules(plan: dict[str, Any], spec: dict[str, Any]) -> HardRuleResu
     """
     failures: list[str] = []
 
-    pois = plan.get("pois") or []
-    legs = plan.get("legs") or []
+    # Agent outputs are LLM-produced JSON; defensively filter to dicts so a
+    # malformed element (a stray list/string from a hallucinated schema
+    # variant) does not raise ``AttributeError: 'list' object has no
+    # attribute 'get'`` and burn the whole race's scoring pass.
+    pois = [p for p in (plan.get("pois") or []) if isinstance(p, dict)]
+    legs = [leg for leg in (plan.get("legs") or []) if isinstance(leg, dict)]
 
     if plan.get("error"):
         failures.append(f"agent error: {plan.get('error')}")
@@ -182,8 +186,8 @@ def score_flow(plan: dict[str, Any]) -> float:
     Penalises revisits to the same POI in the leg sequence, and rewards a
     healthy ratio of dwell time to travel time.
     """
-    legs = plan.get("legs") or []
-    pois = plan.get("pois") or []
+    legs = [leg for leg in (plan.get("legs") or []) if isinstance(leg, dict)]
+    pois = [p for p in (plan.get("pois") or []) if isinstance(p, dict)]
     if not legs:
         return 0.0
     total = sum(_leg_duration_minutes(leg) for leg in legs)
@@ -205,7 +209,7 @@ def score_diversity(plan: dict[str, Any]) -> float:
     Pairs are formed from ``(category, subcategory)`` so two coffee shops in
     different subcategories still count as distinct.
     """
-    pois = plan.get("pois") or []
+    pois = [p for p in (plan.get("pois") or []) if isinstance(p, dict)]
     pairs = [
         (
             poi.get("category", "other"),
@@ -401,8 +405,8 @@ async def _vibe_for(
 
 def _total_duration_minutes(plan: dict[str, Any]) -> float:
     """Sum leg durations (route.duration in seconds, or duration_minutes) + dwell."""
-    legs = plan.get("legs") or []
-    pois = plan.get("pois") or []
+    legs = [leg for leg in (plan.get("legs") or []) if isinstance(leg, dict)]
+    pois = [p for p in (plan.get("pois") or []) if isinstance(p, dict)]
     travel = sum(_leg_duration_minutes(leg) for leg in legs)
     dwell = sum(float(poi.get("dwell_minutes") or 0) for poi in pois)
     if not legs and not dwell:
@@ -422,8 +426,8 @@ def _leg_duration_minutes(leg: dict[str, Any]) -> float:
 
 def _total_cost_sgd(plan: dict[str, Any]) -> float:
     """Sum ``leg.route.fee.amount`` (or ``leg.fee_amount``) + per-POI costs."""
-    legs = plan.get("legs") or []
-    pois = plan.get("pois") or []
+    legs = [leg for leg in (plan.get("legs") or []) if isinstance(leg, dict)]
+    pois = [p for p in (plan.get("pois") or []) if isinstance(p, dict)]
     leg_cost = sum(_leg_fee_amount(leg) for leg in legs)
     poi_cost = sum(float(poi.get("avg_cost_sgd") or 0.0) for poi in pois)
     explicit = plan.get("total_cost_sgd")

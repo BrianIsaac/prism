@@ -35,7 +35,7 @@ GEMINI_API_KEY: str | None = os.environ.get("GEMINI_API_KEY")
 # Three providers, one prompt. The only variable between agents is the model —
 # provider diversity supplies the differentiation.
 OPUS_MODEL: str = os.environ.get("OPUS_MODEL", "claude-opus-4-7")
-GPT_MODEL: str = os.environ.get("GPT_MODEL", "gpt-5.5")
+GPT_MODEL: str = os.environ.get("GPT_MODEL", "gpt-5.4")
 GEMINI_MODEL: str = os.environ.get(
     "GEMINI_MODEL", "gemini/gemini-3.1-pro-preview-customtools"
 )

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentRacePanel } from "@/components/agent-race-panel";
 import { AgentStreamOverlay } from "@/components/agent-stream-overlay";
 import { HitlRating } from "@/components/hitl-rating";
-import { LiveCanvas } from "@/components/live-canvas";
+import { LiveCanvas, useLiveCanvas } from "@/components/live-canvas";
 import { PastRacesList } from "@/components/past-races-list";
 import { PlanCard } from "@/components/plan-card";
 import { PlanDetail } from "@/components/plan-detail";
@@ -30,6 +30,54 @@ import type {
 // demo comfortably (~1.5 events/agent/second for 60s) without blowing the
 // canvas GPU budget on hover pulses.
 const EVENT_WINDOW = 200;
+
+/**
+ * Fly the MapLibre camera to the first ``tool_call`` with resolvable
+ * coordinates. Without this the canvas stays at Singapore zoom 11 for the
+ * whole race — agents' pulses end up as pin-pricks an viewer can't see.
+ * Re-arms whenever ``raceEpoch`` ticks (parent bumps it on launch).
+ */
+function RaceAutoFocus({
+  events,
+  raceEpoch,
+}: {
+  events: RaceStreamEvent[];
+  raceEpoch: number;
+}) {
+  const { map, ready } = useLiveCanvas();
+  const zoomedRef = useRef<number>(-1);
+
+  useEffect(() => {
+    if (!map || !ready) return;
+    if (zoomedRef.current === raceEpoch) return;
+    for (const ev of events) {
+      if (ev.type !== "tool_call" && ev.type !== "tool_result") continue;
+      const payload = ev.payload as {
+        lat?: unknown;
+        lng?: unknown;
+        args?: { lat?: unknown; lng?: unknown; near_lat?: unknown; near_lng?: unknown; origin_lat?: unknown; origin_lng?: unknown };
+      };
+      const args = payload.args ?? {};
+      const lat =
+        (typeof payload.lat === "number" && payload.lat) ||
+        (typeof args.lat === "number" && args.lat) ||
+        (typeof args.near_lat === "number" && args.near_lat) ||
+        (typeof args.origin_lat === "number" && args.origin_lat);
+      const lng =
+        (typeof payload.lng === "number" && payload.lng) ||
+        (typeof args.lng === "number" && args.lng) ||
+        (typeof args.near_lng === "number" && args.near_lng) ||
+        (typeof args.origin_lng === "number" && args.origin_lng);
+      if (typeof lat === "number" && typeof lng === "number") {
+        map.flyTo({ center: [lng, lat], zoom: 14, duration: 1200 });
+        zoomedRef.current = raceEpoch;
+        return;
+      }
+    }
+  }, [events, map, ready, raceEpoch]);
+
+  return null;
+}
 
 // Legacy-to-profile mapping for past-race prefill. Phase 0's `TransportMode`
 // still uses walk/drive/transit/cycle, whereas the route profiles in the
@@ -73,6 +121,10 @@ export function NewRouteShell({ onRated }: NewRouteShellProps) {
   const [error, setError] = useState<string | null>(null);
   const [pastRacesKey, setPastRacesKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  // Monotonically increasing id for the current race. RaceAutoFocus uses it
+  // to re-arm the one-shot flyTo on every new launch, so the map zooms in
+  // once per race instead of sticking at the first race's coord forever.
+  const [raceEpoch, setRaceEpoch] = useState(0);
 
   const streamCloseRef = useRef<(() => void) | null>(null);
 
@@ -120,6 +172,7 @@ export function NewRouteShell({ onRated }: NewRouteShellProps) {
     async (query: string, spec_override: SpecOverride) => {
       resetRaceState();
       setRaceInProgress(true);
+      setRaceEpoch((e) => e + 1);
       try {
         const { race_id } = await startRace(query, spec_override);
         const close = openRaceStream(
@@ -230,6 +283,7 @@ export function NewRouteShell({ onRated }: NewRouteShellProps) {
       <div className="absolute inset-0">
         <LiveCanvas>
           <AgentStreamOverlay events={events} />
+          <RaceAutoFocus events={events} raceEpoch={raceEpoch} />
         </LiveCanvas>
       </div>
 

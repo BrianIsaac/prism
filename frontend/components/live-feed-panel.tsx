@@ -79,7 +79,7 @@ const AGENT_KEYS: ReadonlyArray<{
   {
     key: "gpt",
     label: "gpt",
-    model: "OpenAI GPT 5.5",
+    model: "OpenAI GPT 5.4",
     colour: "#00b14f",
   },
   {

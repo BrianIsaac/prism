@@ -6,15 +6,17 @@ import { cn } from "@/lib/utils";
 import type { Plan, RaceStreamEvent } from "@/lib/types";
 
 // Three racers share one prompt and one harness; the only visible
-// differentiator is the model. Tokens resolve against globals.css.
+// differentiator is the model. Colour hex values mirror
+// `agent-stream-overlay.tsx` (red / green / blue) so the legend dot
+// matches the agent's cursor + trail on the map.
 const AGENTS: ReadonlyArray<{
   name: string;
   colour: string;
   label: string;
 }> = [
-  { name: "opus", colour: "text-agent-opus", label: "Claude Opus 4.7" },
-  { name: "gpt", colour: "text-agent-gpt", label: "OpenAI GPT 5.5" },
-  { name: "gemini", colour: "text-agent-gemini", label: "Gemini 3.1 Pro" },
+  { name: "opus", colour: "#ef4444", label: "Claude Opus 4.7" },
+  { name: "gpt", colour: "#00b14f", label: "OpenAI GPT 5.4" },
+  { name: "gemini", colour: "#60a5fa", label: "Gemini 3.1 Pro" },
 ];
 
 export interface AgentRacePanelProps {
@@ -98,7 +100,8 @@ export function AgentRacePanel({
           >
             <span
               aria-hidden="true"
-              className={cn("font-mono", agent.colour)}
+              className="font-mono"
+              style={{ color: agent.colour }}
             >
               ●
             </span>

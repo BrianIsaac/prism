@@ -10,21 +10,22 @@ import type { RaceStreamEvent } from "@/lib/types";
 const PULSE_DURATION_MS = 4_000;
 const THOUGHT_DURATION_MS = 4_000;
 
-// Per-agent visual identity. Mirrors the design tokens declared in
-// `globals.css` (--color-agent-{opus,gpt,gemini}). Using string literals here
-// rather than CSS variables because the SVG paint properties take colours,
-// not custom-property bindings, and a tooltip stroke is more useful when
-// hard-coded.
+// Per-agent visual identity. Three distinct hues — RED / GREEN / BLUE —
+// so the three cursors, pulses, and trail polylines are legible against
+// the MapLibre satellite canvas even when two agents converge on the
+// same POI. Matches the admin "By agent" panel and the Explore
+// route-colour mapping.
 const AGENT_COLOURS: Record<string, string> = {
-  opus: "#ffffff",
-  "claude-opus": "#ffffff",
-  "claude-opus-4-7": "#ffffff",
+  opus: "#ef4444",
+  "claude-opus": "#ef4444",
+  "claude-opus-4-7": "#ef4444",
   gpt: "#00b14f",
+  "gpt-5-4": "#00b14f",
   "gpt-5-5": "#00b14f",
   openai: "#00b14f",
-  gemini: "#27bc6a",
-  "gemini-3-1-pro": "#27bc6a",
-  google: "#27bc6a",
+  gemini: "#60a5fa",
+  "gemini-3-1-pro": "#60a5fa",
+  google: "#60a5fa",
 };
 const FALLBACK_COLOUR = "#94a3b8";
 
@@ -74,6 +75,13 @@ interface ArcRender {
   d: string;
   colour: string;
   emphasised: boolean;
+}
+
+interface TrailRender {
+  agent: string;
+  colour: string;
+  d: string;
+  pointCount: number;
 }
 
 interface ToolArgBag {
@@ -244,9 +252,13 @@ export function AgentStreamOverlay({
     const thoughts: ThoughtRender[] = [];
     const cursors: Record<string, CursorRender> = {};
     const arcs: ArcRender[] = [];
+    // Per-agent ordered list of every tool-call coordinate. Drawn as a
+    // connected polyline so the audience can see where each model
+    // explored through the race, not just where its cursor is right now.
+    const trailPoints: Record<string, ProjectedPoint[]> = {};
 
     if (!project) {
-      return { pulses, thoughts, cursors: [], arcs };
+      return { pulses, thoughts, cursors: [], arcs, trails: [] as TrailRender[] };
     }
 
     const baseTime = events.length > 0 ? events[events.length - 1].t_ms : 0;
@@ -264,6 +276,14 @@ export function AgentStreamOverlay({
         const proj = project(point.lat, point.lng);
         const tool = payload.tool ?? "unknown";
         cursors[agent] = { agent, x: proj.x, y: proj.y, colour };
+        // Only tool_call contributes a new trail vertex — the paired
+        // tool_result would duplicate the coordinate and doubles the
+        // polyline's visual weight for no information.
+        if (ev.type === "tool_call") {
+          const bucket = trailPoints[agent] ?? [];
+          bucket.push(proj);
+          trailPoints[agent] = bucket;
+        }
         if (ageMs <= PULSE_DURATION_MS) {
           pulses.push({
             key: `${ev.type}-${i}`,
@@ -323,7 +343,20 @@ export function AgentStreamOverlay({
     }
 
     const cursorList = Object.values(cursors);
-    return { pulses, thoughts, cursors: cursorList, arcs };
+    const trails: TrailRender[] = Object.entries(trailPoints)
+      .filter(([, pts]) => pts.length >= 2)
+      .map(([agent, pts]) => {
+        const d = pts
+          .map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+          .join(" ");
+        return {
+          agent,
+          colour: colourForAgent(agent),
+          d,
+          pointCount: pts.length,
+        };
+      });
+    return { pulses, thoughts, cursors: cursorList, arcs, trails };
   }, [events, project, now, emphasisedAgent]);
 
   if (!map || !ready) return null;
@@ -338,6 +371,21 @@ export function AgentStreamOverlay({
       viewBox={`0 0 ${size.width} ${size.height}`}
       className="absolute inset-0 pointer-events-none z-20"
     >
+      {/* Per-agent exploration polyline — drawn first so pulses and cursors
+          sit above it. Dashed, semi-transparent; one line per agent. */}
+      {renders.trails.map((trail) => (
+        <path
+          key={`trail-${trail.agent}`}
+          d={trail.d}
+          fill="none"
+          stroke={trail.colour}
+          strokeWidth={1.8}
+          strokeDasharray="5 5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={0.55}
+        />
+      ))}
       {renders.arcs.map((arc) => (
         <path
           key={arc.key}
