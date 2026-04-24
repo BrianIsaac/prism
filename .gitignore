@@ -23,6 +23,9 @@ next-env.d.ts
 .shard-done/
 INTEGRATION_TODOS.md
 
+# Claude Code local instructions
+CLAUDE.md
+
 # OS
 .DS_Store
 Thumbs.db
