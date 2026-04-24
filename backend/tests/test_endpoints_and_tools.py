@@ -440,9 +440,9 @@ def test_alternatives_endpoint_shape_when_upstream_empty(client, monkeypatch):
     """With GRABMAPS_API_KEY unset the upstream call raises — the handler
     returns an empty alternatives list rather than 500ing the frontend.
     """
-    import app.tools.grabmaps as gm
+    from app.tools import _http
 
-    monkeypatch.setattr(gm, "GRABMAPS_API_KEY", None, raising=True)
+    monkeypatch.setattr(_http, "GRABMAPS_API_KEY", None, raising=True)
     r = client.get(
         "/alternatives",
         params={"category": "food", "near_lat": 1.3, "near_lng": 103.8, "limit": 3},
@@ -458,29 +458,31 @@ def test_alternatives_endpoint_shape_when_upstream_empty(client, monkeypatch):
 # ----------------------------------------------------------------------------
 
 
-async def test_get_traffic_calls_upstream_circle(monkeypatch):
-    from app.tools import live
+async def test_get_traffic_calls_upstream_bbox(monkeypatch):
+    from app.config import GRABMAPS_BASE_URL
+    from app.tools import _http, live
 
-    monkeypatch.setattr(live, "GRABMAPS_API_KEY", "test-key", raising=True)
+    monkeypatch.setattr(_http, "GRABMAPS_API_KEY", "test-key", raising=True)
     live._traffic_cache.clear()
     expected = {"segments": [{"segmentId": "a", "congestion": "heavy", "avgSpeedKph": 12}]}
     with respx.mock(assert_all_called=False) as router:
-        router.get(f"{live.GRABMAPS_BASE_URL}/api/v1/traffic/real-time/circle").mock(
+        router.get(f"{GRABMAPS_BASE_URL}/api/v1/traffic/real-time/bbox").mock(
             return_value=Response(200, json=expected)
         )
         body = await live.get_traffic(lat=1.3521, lng=103.8198, radius_m=500)
         assert body == expected
 
 
-async def test_get_incidents_calls_upstream_circle(monkeypatch):
-    from app.tools import live
+async def test_get_incidents_calls_upstream_bbox(monkeypatch):
+    from app.config import GRABMAPS_BASE_URL
+    from app.tools import _http, live
 
-    monkeypatch.setattr(live, "GRABMAPS_API_KEY", "test-key", raising=True)
+    monkeypatch.setattr(_http, "GRABMAPS_API_KEY", "test-key", raising=True)
     live._incident_cache.clear()
     expected = {"incidents": [{"type": "accident", "severity": 3}]}
     with respx.mock(assert_all_called=False) as router:
         router.get(
-            f"{live.GRABMAPS_BASE_URL}/api/v1/traffic/incidents/circle"
+            f"{GRABMAPS_BASE_URL}/api/v1/traffic/incidents/bbox"
         ).mock(return_value=Response(200, json=expected))
         body = await live.get_incidents(lat=1.3521, lng=103.8198, radius_m=1000)
         assert body == expected
@@ -492,7 +494,7 @@ async def test_get_street_view_uses_cache_after_first_fetch(monkeypatch, tmp_pat
 
     import app.config
     import app.storage
-    from app.tools import live
+    from app.tools import _http, live
 
     db_path = str(tmp_path / "streetview.db")
     os.environ["SQLITE_PATH"] = db_path
@@ -500,7 +502,7 @@ async def test_get_street_view_uses_cache_after_first_fetch(monkeypatch, tmp_pat
     monkeypatch.setattr(app.storage, "_DEFAULT_SQLITE_PATH", db_path, raising=False)
     await app.storage.init_db()
 
-    monkeypatch.setattr(live, "GRABMAPS_API_KEY", "test-key", raising=True)
+    monkeypatch.setattr(_http, "GRABMAPS_API_KEY", "test-key", raising=True)
     photo_payload = {
         "photos": [
             {
@@ -511,9 +513,10 @@ async def test_get_street_view_uses_cache_after_first_fetch(monkeypatch, tmp_pat
             }
         ]
     }
+    from app.config import GRABMAPS_BASE_URL
     with respx.mock(assert_all_called=False) as router:
         upstream = router.get(
-            f"{live.GRABMAPS_BASE_URL}/api/v1/openstreetcam-api/2.0/photo/"
+            f"{GRABMAPS_BASE_URL}/api/v1/openstreetcam-api/2.0/photo/"
         ).mock(return_value=Response(200, json=photo_payload))
         first = await live.get_street_view(lat=1.2821, lng=103.8583, radius_m=100, limit=4)
         second = await live.get_street_view(lat=1.2821, lng=103.8583, radius_m=100, limit=4)

@@ -11,9 +11,16 @@ responses are cached in-process with a 60-second TTL so an agent cannot
 re-pull the same coordinate twice in a single race.
 
 Endpoint mapping:
-    - ``get_traffic``     -> GET ``/api/v1/traffic/real-time/circle``
-    - ``get_incidents``   -> GET ``/api/v1/traffic/incidents/circle``
+    - ``get_traffic``     -> GET ``/api/v1/traffic/real-time/bbox``
+    - ``get_incidents``   -> GET ``/api/v1/traffic/incidents/bbox``
     - ``get_street_view`` -> GET ``/api/v1/openstreetcam-api/2.0/photo/``
+
+The ``/circle`` variants the API reference mentions are not actually served
+by the upstream (confirmed 404 on every probe). Traffic and incidents run
+against ``/bbox`` with ``lat1/lat2/lon1/lon2`` params; the radius-based
+agent-facing signature is preserved by deriving a square bbox centred on
+``(lat, lng)`` with a half-side of ``radius_m`` metres (and clamping to
+Grab's 0.044°-per-side limit to avoid a 400 Bad Request).
 """
 
 from __future__ import annotations
@@ -23,23 +30,26 @@ import uuid
 from datetime import date
 from typing import Any
 
-import httpx
-
 from app import storage
 from app.config import (
-    GRABMAPS_API_KEY,
-    GRABMAPS_BASE_URL,
     INCIDENT_CACHE_TTL_SECONDS,
     TRAFFIC_CACHE_TTL_SECONDS,
 )
+from app.tools._http import get_json
 
 
-_TRAFFIC_CIRCLE_PATH = "/api/v1/traffic/real-time/circle"
-_INCIDENTS_CIRCLE_PATH = "/api/v1/traffic/incidents/circle"
+_TRAFFIC_BBOX_PATH = "/api/v1/traffic/real-time/bbox"
+_INCIDENTS_BBOX_PATH = "/api/v1/traffic/incidents/bbox"
 _STREETVIEW_PATH = "/api/v1/openstreetcam-api/2.0/photo/"
 
 _DEFAULT_TIMEOUT = 15.0
 _STREETVIEW_TIMEOUT = 30.0
+
+# GrabMaps bbox endpoints reject requests wider than ~0.044° per side with
+# ``invalid_argument``. Cap any caller-supplied radius (+ the metre-to-
+# degree conversion below) so we never exceed that.
+_MAX_HALF_DEGREE = 0.022
+_METRES_PER_DEGREE = 111_000.0
 
 _VALID_PROJECTIONS = {"PLANE", "SPHERE"}
 
@@ -48,13 +58,20 @@ _traffic_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _incident_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
-def _auth_headers() -> dict[str, str]:
-    """Return the Bearer auth header. Raises if the key is missing."""
-    if not GRABMAPS_API_KEY:
-        raise RuntimeError(
-            "GRABMAPS_API_KEY is not set — populate backend/.env before live calls"
-        )
-    return {"Authorization": f"Bearer {GRABMAPS_API_KEY}"}
+def _bbox_from_radius(lat: float, lng: float, radius_m: float) -> tuple[float, float, float, float]:
+    """Derive a square bbox centred on ``(lat, lng)`` from a metre radius.
+
+    Returns ``(lat1, lat2, lon1, lon2)`` matching the param names
+    GrabMaps' ``/bbox`` endpoints accept. Clamps to the upstream 0.044°
+    ceiling so the request never gets rejected for size.
+    """
+    half_deg = min(_MAX_HALF_DEGREE, max(0.001, float(radius_m) / _METRES_PER_DEGREE))
+    return (
+        float(lat) - half_deg,
+        float(lat) + half_deg,
+        float(lng) - half_deg,
+        float(lng) + half_deg,
+    )
 
 
 def _bbox_key(lat: float, lng: float, radius_m: float) -> str:
@@ -86,26 +103,24 @@ async def get_traffic(
     if cached is not None and (now - cached[0]) < TRAFFIC_CACHE_TTL_SECONDS:
         return cached[1]
 
-    params = {"lat": float(lat), "lng": float(lng), "radius": int(radius_m)}
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        response = await client.get(
-            f"{GRABMAPS_BASE_URL}{_TRAFFIC_CIRCLE_PATH}",
-            params=params,
-            headers=_auth_headers(),
-        )
-        response.raise_for_status()
-        body = response.json()
+    lat1, lat2, lon1, lon2 = _bbox_from_radius(lat, lng, radius_m)
+    body = await get_json(
+        _TRAFFIC_BBOX_PATH,
+        params={
+            "lat1": lat1,
+            "lat2": lat2,
+            "lon1": lon1,
+            "lon2": lon2,
+            "linkReference": "GRAB_WAY",
+        },
+        timeout=_DEFAULT_TIMEOUT,
+    )
 
     _traffic_cache[key] = (now, body)
     try:
         await storage.insert_traffic_snapshot(
             snapshot_id=str(uuid.uuid4()),
-            bbox=(
-                float(lat) - 0.001,
-                float(lng) - 0.001,
-                float(lat) + 0.001,
-                float(lng) + 0.001,
-            ),
+            bbox=(lat1, lon1, lat2, lon2),
             payload=body if isinstance(body, dict) else {"raw": body},
         )
     except (NotImplementedError, Exception):  # noqa: BLE001 — storage may be mid-boot
@@ -140,20 +155,18 @@ async def get_incidents(
     if cached is not None and (now - cached[0]) < INCIDENT_CACHE_TTL_SECONDS:
         return cached[1]
 
-    params = {
-        "lat": float(lat),
-        "lng": float(lng),
-        "radius": int(radius_m),
-        "linkReference": "GRAB_WAY",
-    }
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        response = await client.get(
-            f"{GRABMAPS_BASE_URL}{_INCIDENTS_CIRCLE_PATH}",
-            params=params,
-            headers=_auth_headers(),
-        )
-        response.raise_for_status()
-        body = response.json()
+    lat1, lat2, lon1, lon2 = _bbox_from_radius(lat, lng, radius_m)
+    body = await get_json(
+        _INCIDENTS_BBOX_PATH,
+        params={
+            "lat1": lat1,
+            "lat2": lat2,
+            "lon1": lon1,
+            "lon2": lon2,
+            "linkReference": "GRAB_WAY",
+        },
+        timeout=_DEFAULT_TIMEOUT,
+    )
 
     _incident_cache[key] = (now, body)
     try:
@@ -228,14 +241,11 @@ async def get_street_view(
         "limit": int(limit),
         "projection": effective_projection,
     }
-    async with httpx.AsyncClient(timeout=_STREETVIEW_TIMEOUT) as client:
-        response = await client.get(
-            f"{GRABMAPS_BASE_URL}{_STREETVIEW_PATH}",
-            params=params,
-            headers=_auth_headers(),
-        )
-        response.raise_for_status()
-        body = response.json()
+    body = await get_json(
+        _STREETVIEW_PATH,
+        params=params,
+        timeout=_STREETVIEW_TIMEOUT,
+    )
 
     if isinstance(body, dict):
         photos = body.get("photos") or body.get("result") or body.get("data") or []

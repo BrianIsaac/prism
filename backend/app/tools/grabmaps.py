@@ -21,9 +21,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-import httpx
-
-from app.config import GRABMAPS_API_KEY, GRABMAPS_BASE_URL
+from app.tools._http import get_json
 
 
 _PLACES_SEARCH_PATH = "/api/v1/maps/poi/v1/search"
@@ -35,18 +33,6 @@ _DEFAULT_TIMEOUT = 15.0
 
 _VALID_PROFILES = {"driving", "motorcycle", "tricycle", "cycling", "walking"}
 _VALID_RANK_BY = {"distance", "popularity"}
-
-
-def _auth_headers() -> dict[str, str]:
-    """Return the Bearer auth header populated from :data:`GRABMAPS_API_KEY`."""
-    if not GRABMAPS_API_KEY:
-        # Leaving the header off would silently succeed against an open proxy
-        # and hide the mis-configured-credentials failure mode. Raise loudly so
-        # the first live call fails with a clear error.
-        raise RuntimeError(
-            "GRABMAPS_API_KEY is not set — populate backend/.env before live calls"
-        )
-    return {"Authorization": f"Bearer {GRABMAPS_API_KEY}"}
 
 
 def _as_location(lat: float, lng: float) -> str:
@@ -83,14 +69,7 @@ async def places_search(
         params["country"] = country
     if near_lat is not None and near_lng is not None:
         params["location"] = _as_location(near_lat, near_lng)
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        response = await client.get(
-            f"{GRABMAPS_BASE_URL}{_PLACES_SEARCH_PATH}",
-            params=params,
-            headers=_auth_headers(),
-        )
-        response.raise_for_status()
-        return response.json()
+    return await get_json(_PLACES_SEARCH_PATH, params=params, timeout=_DEFAULT_TIMEOUT)
 
 
 async def nearby_search(
@@ -130,14 +109,7 @@ async def nearby_search(
         params["rankBy"] = rank_by
     if language:
         params["language"] = language
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        response = await client.get(
-            f"{GRABMAPS_BASE_URL}{_NEARBY_PATH}",
-            params=params,
-            headers=_auth_headers(),
-        )
-        response.raise_for_status()
-        return response.json()
+    return await get_json(_NEARBY_PATH, params=params, timeout=_DEFAULT_TIMEOUT)
 
 
 async def reverse_geocode(
@@ -157,14 +129,7 @@ async def reverse_geocode(
         with a single entry.
     """
     params = {"location": _as_location(lat, lng)}
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        response = await client.get(
-            f"{GRABMAPS_BASE_URL}{_REVERSE_GEO_PATH}",
-            params=params,
-            headers=_auth_headers(),
-        )
-        response.raise_for_status()
-        return response.json()
+    return await get_json(_REVERSE_GEO_PATH, params=params, timeout=_DEFAULT_TIMEOUT)
 
 
 async def route(
@@ -212,14 +177,7 @@ async def route(
     ]
     if alternatives:
         params.append(("alternatives", "true"))
-    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
-        response = await client.get(
-            f"{GRABMAPS_BASE_URL}{_DIRECTION_PATH}",
-            params=params,
-            headers=_auth_headers(),
-        )
-        response.raise_for_status()
-        return response.json()
+    return await get_json(_DIRECTION_PATH, params=params, timeout=_DEFAULT_TIMEOUT)
 
 
 async def route_matrix(
