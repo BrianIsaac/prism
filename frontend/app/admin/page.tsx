@@ -1,22 +1,23 @@
+"use client";
+
+// Prism operator dashboard. Renders four surfaces:
+//   1. harness weights — frozen_defaults vs runtime (drifts at α = 0.02/rating)
+//   2. weight-drift sparklines — flow / diversity / vibe over time
+//   3. live-feed panel — five sparklines (search, routing, traffic, incidents, streetview)
+//   4. bug-report markdown + feedback KB (digest, tags, raw tail, rebuild)
+import nextDynamic from "next/dynamic";
+
+// `lib/api-client.ts` (Phase-0-owned) eagerly imports `eventsource-polyfill`,
+// which touches `window` at module scope and crashes Node's prerender worker
+// during `next build`. Loading the real admin view via `next/dynamic` with
+// `ssr: false` defers that module graph to the browser, so the build can
+// still static-generate the shell while the data panels mount client-side.
+// The Phase-0 polyfill root cause is filed in `INTEGRATION_TODOS.md`.
+const AdminView = nextDynamic(
+  () => import("./admin-view").then((m) => m.AdminView),
+  { ssr: false },
+);
+
 export default function AdminPage() {
-  return (
-    <main className="h-full w-full flex items-center justify-center px-6">
-      <section className="max-w-xl rounded-lg border border-white/10 bg-black/60 backdrop-blur p-8 animate-fade-in-up">
-        <p className="text-xs uppercase tracking-[0.2em] text-grab-green/80">
-          Admin
-        </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">
-          Weights, feedback pulse, live feed
-        </h1>
-        <p className="mt-4 text-sm leading-relaxed text-white/70">
-          Frozen vs drifted harness weights, feedback-digest history, and the
-          live API-call-per-category feed. Phase 6 ships the sparkline and the
-          live-feed panel.
-        </p>
-        <p className="mt-6 text-xs text-white/40">
-          Operator dashboard arrives in Phase 6.
-        </p>
-      </section>
-    </main>
-  );
+  return <AdminView />;
 }
