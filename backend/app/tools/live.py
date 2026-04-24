@@ -140,7 +140,12 @@ async def get_incidents(
     if cached is not None and (now - cached[0]) < INCIDENT_CACHE_TTL_SECONDS:
         return cached[1]
 
-    params = {"lat": float(lat), "lng": float(lng), "radius": int(radius_m)}
+    params = {
+        "lat": float(lat),
+        "lng": float(lng),
+        "radius": int(radius_m),
+        "linkReference": "GRAB_WAY",
+    }
     async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
         response = await client.get(
             f"{GRABMAPS_BASE_URL}{_INCIDENTS_CIRCLE_PATH}",
@@ -211,14 +216,18 @@ async def get_street_view(
     if cached_photos:
         return {"photos": cached_photos, "cached": True}
 
+    # Default to ``SPHERE`` (360° panorama) so the vibe judge gets
+    # spherical imagery when the caller does not specify — matches the
+    # grabmaps_api_reference.md §OpenStreetCam note that vibe scoring
+    # should ground in pano photos where available.
+    effective_projection = projection or "SPHERE"
     params: dict[str, Any] = {
         "lat": float(lat),
         "lng": float(lng),
         "radius": int(radius_m),
         "limit": int(limit),
+        "projection": effective_projection,
     }
-    if projection:
-        params["projection"] = projection
     async with httpx.AsyncClient(timeout=_STREETVIEW_TIMEOUT) as client:
         response = await client.get(
             f"{GRABMAPS_BASE_URL}{_STREETVIEW_PATH}",

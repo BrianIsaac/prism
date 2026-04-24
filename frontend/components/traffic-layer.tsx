@@ -11,7 +11,7 @@ const LAYER_ID = "prism-traffic-layer";
 
 // Backend proxy for the GrabMaps real-time traffic raster tile endpoint.
 // MapLibre interpolates {z}/{x}/{y} per visible viewport tile.
-const TRAFFIC_TILE_URL = `${API_BASE}/api/v1/traffic/real-time/tile/{z}/{x}/{y}`;
+const TRAFFIC_TILE_URL = `${API_BASE}/grabmaps-proxy/traffic-raster-tile/{z}/{x}/{y}`;
 
 export interface TrafficLayerProps {
   visible: boolean;
@@ -48,10 +48,15 @@ export function TrafficLayer({ visible }: TrafficLayerProps) {
     }
 
     return () => {
-      // Style swaps (rare) tear down sources/layers; defensive removal keeps
-      // the map clean if the parent unmounts the layer entirely.
-      if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID);
-      if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
+      // The parent LiveCanvas destroys the map on unmount; this cleanup can
+      // run after that, so guard both the map reference and its lookups.
+      try {
+        if (!map) return;
+        if (map.getLayer(LAYER_ID)) map.removeLayer(LAYER_ID);
+        if (map.getSource(SOURCE_ID)) map.removeSource(SOURCE_ID);
+      } catch {
+        // Map already torn down — nothing to clean up.
+      }
     };
   }, [map, ready]);
 

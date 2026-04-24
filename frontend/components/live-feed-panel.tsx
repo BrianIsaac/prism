@@ -4,7 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Sparkline } from "@/components/sparkline";
 import { fetchLiveFeed } from "@/lib/api-client";
-import type { LiveFeedCategory, LiveFeedCounts } from "@/lib/types";
+import type {
+  LiveFeedCategory,
+  LiveFeedCounts,
+  RaceAgentName,
+} from "@/lib/types";
 
 // 2s tick × 450 samples = 15 minutes of live feed on screen.
 const POLL_MS = 2000;
@@ -57,6 +61,37 @@ type CategoryKey = (typeof CATEGORIES)[number]["key"];
 
 type Buffer = Record<CategoryKey, number[]>;
 
+// Three named racers, colour-matched to `agent-race-panel.tsx`. "other"
+// is intentionally hidden — any drift into it bumps the total line without
+// a matching agent bar, which is visible by comparison.
+const AGENT_KEYS: ReadonlyArray<{
+  key: Exclude<RaceAgentName, "other">;
+  label: string;
+  model: string;
+  colour: string;
+}> = [
+  {
+    key: "opus",
+    label: "opus",
+    model: "Claude Opus 4.7",
+    colour: "#ef4444",
+  },
+  {
+    key: "gpt",
+    label: "gpt",
+    model: "OpenAI GPT 5.5",
+    colour: "#00b14f",
+  },
+  {
+    key: "gemini",
+    label: "gemini",
+    model: "Gemini 3.1 Pro",
+    colour: "#60a5fa",
+  },
+];
+
+type AgentKey = (typeof AGENT_KEYS)[number]["key"];
+
 function emptyBuffer(): Buffer {
   return {
     search: [],
@@ -65,6 +100,10 @@ function emptyBuffer(): Buffer {
     incidents: [],
     streetview: [],
   };
+}
+
+function emptyAgentBuffer(): Record<AgentKey, number[]> {
+  return { opus: [], gpt: [], gemini: [] };
 }
 
 export interface LiveFeedPanelProps {
@@ -85,6 +124,8 @@ export function LiveFeedPanel({
   failureRatePercent = null,
 }: LiveFeedPanelProps) {
   const [buffer, setBuffer] = useState<Buffer>(emptyBuffer);
+  const [agentBuffer, setAgentBuffer] =
+    useState<Record<AgentKey, number[]>>(emptyAgentBuffer);
   const [latest, setLatest] = useState<LiveFeedCounts | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,6 +148,19 @@ export function LiveFeedPanel({
           const next = emptyBuffer();
           for (const { key } of CATEGORIES) {
             const sample = data.by_category[key] ?? 0;
+            const series = prev[key];
+            const appended =
+              series.length >= MAX_SAMPLES
+                ? [...series.slice(series.length - MAX_SAMPLES + 1), sample]
+                : [...series, sample];
+            next[key] = appended;
+          }
+          return next;
+        });
+        setAgentBuffer((prev) => {
+          const next = emptyAgentBuffer();
+          for (const { key } of AGENT_KEYS) {
+            const sample = data.by_agent?.[key] ?? 0;
             const series = prev[key];
             const appended =
               series.length >= MAX_SAMPLES
@@ -225,6 +279,68 @@ export function LiveFeedPanel({
             </div>
           );
         })}
+      </div>
+
+      <div className="mt-6 pt-4 border-t border-white/5">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-xs uppercase tracking-wider text-white/60">
+            By agent
+          </h3>
+          <span className="text-[10px] font-mono tabular-nums text-white/40">
+            avg {(latest?.per_agent_average ?? 0).toFixed(1)}/min ·{" "}
+            {latest?.active_agents ?? 0}/3 active
+          </span>
+        </div>
+        <div className="mt-3 flex flex-col gap-3">
+          {AGENT_KEYS.map((agent) => {
+            const series = agentBuffer[agent.key];
+            const current = latest?.by_agent?.[agent.key] ?? 0;
+            const mix = latest?.by_agent_category?.[agent.key];
+            const topCategory = mix
+              ? (Object.entries(mix) as [CategoryKey | "other", number][])
+                  .filter(([k]) => k !== "other")
+                  .sort((a, b) => b[1] - a[1])[0]
+              : null;
+            return (
+              <div
+                key={agent.key}
+                className="grid grid-cols-[7rem_1fr_auto] items-center gap-3"
+              >
+                <div className="flex flex-col">
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: agent.colour }}
+                  >
+                    {agent.label}
+                  </span>
+                  <span className="text-[10px] text-white/30 font-mono">
+                    {agent.model}
+                  </span>
+                </div>
+                <Sparkline
+                  values={series}
+                  colour={agent.colour}
+                  width={260}
+                  height={28}
+                  label={`${agent.label} tool calls per minute`}
+                />
+                <span
+                  className="text-xs font-mono tabular-nums text-right"
+                  style={{ color: agent.colour }}
+                  aria-label={`${agent.label} current rate ${current} calls per minute`}
+                >
+                  {current}
+                  <span className="text-[9px] text-white/30 ml-1">/min</span>
+                  {topCategory && topCategory[1] > 0 ? (
+                    <div className="text-[9px] text-white/30 font-mono mt-0.5">
+                      mostly {topCategory[0]}
+                    </div>
+                  ) : null}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <p className="mt-4 text-[10px] text-white/30 leading-relaxed">

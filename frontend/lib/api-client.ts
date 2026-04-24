@@ -12,6 +12,7 @@ import type {
   FeedbackInput,
   LiveFeedCounts,
   PastRace,
+  RacePlansResponse,
   RaceStartResponse,
   RaceStreamEvent,
   Rating,
@@ -165,6 +166,20 @@ export async function fetchPastRaces(limit: number = 20): Promise<PastRace[]> {
   const res = await fetch(`${API_BASE}/races?limit=${limit}`);
   const data = await json<{ races: PastRace[] }>(res);
   return data.races;
+}
+
+/**
+ * All three racers' plans for a given race. Used by Explore to overlay
+ * every agent's itinerary on the MapLibre canvas so the per-agent
+ * divergence is visible.
+ */
+export async function fetchRacePlans(
+  race_id: string,
+): Promise<RacePlansResponse> {
+  const res = await fetch(
+    `${API_BASE}/race/${encodeURIComponent(race_id)}/plans`,
+  );
+  return json<RacePlansResponse>(res);
 }
 
 // ---------- Admin ----------

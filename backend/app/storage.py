@@ -319,6 +319,43 @@ async def insert_plan(
         await db.commit()
 
 
+async def list_plans_by_race(race_id: str) -> list[dict[str, Any]]:
+    """Return every plan persisted for a race (any hard_pass verdict).
+
+    The Explore view uses this to overlay all three agents' routes on the
+    MapLibre canvas after the user picks one pinned plan — each racer's
+    itinerary is coloured by ``agent_name`` so the judge can read the
+    per-agent divergence at a glance.
+    """
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        rows = await db.execute_fetchall(
+            """
+            SELECT id, race_id, agent_name, model, plan, hard_pass,
+                   soft_scores, total_score, rank, country_iso3, created_at
+            FROM plans
+            WHERE race_id = ?
+            ORDER BY COALESCE(rank, 99) ASC, id ASC
+            """,
+            (race_id,),
+        )
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            try:
+                d["plan"] = json.loads(d.get("plan") or "{}")
+            except (ValueError, TypeError):
+                d["plan"] = {}
+            if d.get("soft_scores"):
+                try:
+                    d["soft_scores"] = json.loads(d["soft_scores"])
+                except (ValueError, TypeError):
+                    d["soft_scores"] = None
+            d["plan_id"] = d.pop("id")
+            out.append(d)
+        return out
+
+
 async def get_plan(plan_id: str) -> dict[str, Any] | None:
     """Return the persisted plan dict, or ``None`` when missing."""
     async with _connect() as db:
@@ -442,7 +479,7 @@ async def list_validated_plans(
         if country_iso3:
             real_rows = await db.execute_fetchall(
                 """
-                SELECT v.*, p.plan AS plan_json, p.total_score, p.agent_name
+                SELECT v.*, p.plan AS plan_json, p.total_score, p.agent_name, p.race_id
                 FROM validated_plans v
                 JOIN plans p ON v.plan_id = p.id
                 WHERE v.country_iso3 = ?
@@ -454,7 +491,7 @@ async def list_validated_plans(
         else:
             real_rows = await db.execute_fetchall(
                 """
-                SELECT v.*, p.plan AS plan_json, p.total_score, p.agent_name
+                SELECT v.*, p.plan AS plan_json, p.total_score, p.agent_name, p.race_id
                 FROM validated_plans v
                 JOIN plans p ON v.plan_id = p.id
                 ORDER BY v.created_at DESC
@@ -494,7 +531,7 @@ async def list_validated_plans(
                 SELECT p.*
                 FROM plans p
                 LEFT JOIN validated_plans v ON v.plan_id = p.id
-                WHERE p.hard_pass = 1 AND p.rank = 1 AND v.id IS NULL
+                WHERE p.hard_pass = 1 AND p.rank IS NOT NULL AND p.rank <= 3 AND v.id IS NULL
                   AND p.country_iso3 = ?
                 ORDER BY p.created_at DESC
                 LIMIT ?
@@ -507,7 +544,7 @@ async def list_validated_plans(
                 SELECT p.*
                 FROM plans p
                 LEFT JOIN validated_plans v ON v.plan_id = p.id
-                WHERE p.hard_pass = 1 AND p.rank = 1 AND v.id IS NULL
+                WHERE p.hard_pass = 1 AND p.rank IS NOT NULL AND p.rank <= 3 AND v.id IS NULL
                 ORDER BY p.created_at DESC
                 LIMIT ?
                 """,
@@ -536,6 +573,7 @@ async def list_validated_plans(
                 {
                     "id": f"auto-{plan_id}",
                     "plan_id": plan_id,
+                    "race_id": row["race_id"],
                     "country_iso3": row["country_iso3"],
                     "anchor_lat": None,
                     "anchor_lng": None,
@@ -973,40 +1011,59 @@ async def set_streetview_cache(
 
 
 async def fetch_live_feed_counts(window_seconds: int = 60) -> dict[str, Any]:
-    """Aggregate trace rows by category over a recent time window.
+    """Aggregate trace rows by category and by racing agent.
 
-    Categories: ``search``, ``routing``, ``traffic``, ``incidents``,
-    ``streetview``, ``other``. Tools not in the canonical map fall into
-    ``other`` so the panel surfaces accidental tool additions rather than
-    silently dropping them.
+    Returns three shapes:
+        - ``by_category`` — tool calls bucketed into
+          ``{search, routing, traffic, incidents, streetview, other}``.
+        - ``by_agent`` — per-agent totals, fixed keys for the three racers
+          (``opus``, ``gpt``, ``gemini``) plus ``other`` for anything else.
+        - ``by_agent_category`` — per-agent × category matrix so the admin
+          panel can show each racer's tool-call mix side by side.
+
+    Agents that have not fired any call in the window still appear with
+    zeroed counts so the UI renders a stable three-agent strip rather than
+    growing rows as each racer wakes up.
     """
-    by_category: dict[str, int] = {
-        "search": 0,
-        "routing": 0,
-        "traffic": 0,
-        "incidents": 0,
-        "streetview": 0,
-        "other": 0,
+    known_agents = ("opus", "gpt", "gemini")
+    category_keys = ("search", "routing", "traffic", "incidents", "streetview", "other")
+
+    by_category: dict[str, int] = {k: 0 for k in category_keys}
+    by_agent: dict[str, int] = {k: 0 for k in (*known_agents, "other")}
+    by_agent_category: dict[str, dict[str, int]] = {
+        agent: {k: 0 for k in category_keys} for agent in (*known_agents, "other")
     }
     total = 0
     async with _connect() as db:
         rows = await db.execute_fetchall(
             f"""
-            SELECT tool_name, COUNT(*) AS n
+            SELECT tool_name, agent_name, COUNT(*) AS n
             FROM traces
             WHERE created_at >= datetime('now', '-{int(window_seconds)} seconds')
-            GROUP BY tool_name
+            GROUP BY tool_name, agent_name
             """,
         )
         for row in rows:
-            tool_name = row[0]
-            n = int(row[1] or 0)
-            category = _TOOL_CATEGORY.get(str(tool_name), "other")
+            tool_name = str(row[0] or "")
+            raw_agent = str(row[1] or "").lower()
+            n = int(row[2] or 0)
+            category = _TOOL_CATEGORY.get(tool_name, "other")
+            agent = raw_agent if raw_agent in known_agents else "other"
             by_category[category] += n
+            by_agent[agent] += n
+            by_agent_category[agent][category] += n
             total += n
+
+    active_agents = sum(1 for a in known_agents if by_agent[a] > 0)
+    per_agent_average = total / active_agents if active_agents else 0.0
+
     return {
         "by_category": by_category,
+        "by_agent": by_agent,
+        "by_agent_category": by_agent_category,
         "total_calls": total,
+        "active_agents": active_agents,
+        "per_agent_average": per_agent_average,
         "window_seconds": window_seconds,
     }
 
@@ -1050,6 +1107,7 @@ __all__ = [
     "insert_weight_snapshot",
     "list_feedback",
     "list_feedback_digests",
+    "list_plans_by_race",
     "list_races",
     "list_validated_plans",
     "materialise_auto_pinned",

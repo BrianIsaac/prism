@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 
 export interface WordRevealProps {
   text: string;
@@ -16,6 +16,11 @@ export interface WordRevealProps {
  *
  * Honours `prefers-reduced-motion`: under `motion-reduce` the words snap to
  * full opacity instantly.
+ *
+ * The inter-word space is rendered outside each ``inline-block`` span so
+ * the browser's whitespace collapser does not strip it — trailing
+ * whitespace inside an ``inline-block`` is treated as edge whitespace and
+ * removed, which concatenates words into one run ("Aphotogenichalf-day").
  */
 export function WordReveal({
   text,
@@ -27,14 +32,15 @@ export function WordReveal({
   return (
     <p aria-live="polite" className={className}>
       {words.map((word, i) => (
-        <span
-          key={`${i}-${word}`}
-          style={{ animationDelay: `${i * staggerMs}ms` }}
-          className="inline-block opacity-0 motion-safe:animate-fade-in-up motion-reduce:opacity-100"
-        >
-          {word}
-          {i < words.length - 1 ? " " : ""}
-        </span>
+        <Fragment key={`${i}-${word}`}>
+          <span
+            style={{ animationDelay: `${i * staggerMs}ms` }}
+            className="inline-block opacity-0 motion-safe:animate-fade-in-up motion-reduce:opacity-100"
+          >
+            {word}
+          </span>
+          {i < words.length - 1 ? " " : null}
+        </Fragment>
       ))}
     </p>
   );

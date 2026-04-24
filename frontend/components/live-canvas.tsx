@@ -147,7 +147,7 @@ export function LiveCanvas({ children }: LiveCanvasProps) {
           ref={containerRef}
           role="region"
           aria-label="Singapore live map"
-          className="absolute inset-0"
+          className="w-full h-full"
         />
         {styleError ? (
           <div

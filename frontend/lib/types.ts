@@ -1,7 +1,20 @@
 // Types mirroring the FastAPI Pydantic models in backend/app/models.py.
 // Hand-maintained for now; switch to openapi-typescript if the schema grows.
 
-export type TransportMode = "walk" | "drive" | "transit" | "cycle";
+// Phase 7 alignment: v1's coarse union is superseded by the five GrabMaps
+// route profiles (docs/grabmaps_api_reference.md §Routing). The legacy strings
+// stay in the union for past-race prefill compatibility until the next build
+// cycle retires them.
+export type TransportMode =
+  | "driving"
+  | "motorcycle"
+  | "tricycle"
+  | "cycling"
+  | "walking"
+  | "walk"
+  | "drive"
+  | "transit"
+  | "cycle";
 
 export type DietaryFilter = "halal" | "vegetarian" | "vegan";
 
@@ -204,9 +217,16 @@ export type LiveFeedCategory =
   | "streetview"
   | "other";
 
+export type RaceAgentName = "opus" | "gpt" | "gemini" | "other";
+
 export interface LiveFeedCounts {
   by_category: Record<LiveFeedCategory, number>;
+  by_agent?: Record<RaceAgentName, number>;
+  by_agent_category?: Record<RaceAgentName, Record<LiveFeedCategory, number>>;
   total_calls: number;
+  active_agents?: number;
+  per_agent_average?: number;
+  window_seconds?: number;
 }
 
 // ---------- Validated plans, feedback, alternatives ----------
@@ -214,6 +234,7 @@ export interface LiveFeedCounts {
 export interface ValidatedPlan {
   id: string;
   plan_id: string;
+  race_id?: string | null;
   country_iso3: string;
   anchor_lat: number | null;
   anchor_lng: number | null;
@@ -284,6 +305,27 @@ export interface PastRace {
   top_plan: (Plan & { id?: string; rank?: number | null }) | null;
 }
 
+// A single racer's plan within a race (see /race/{race_id}/plans).
+export interface RacePlan {
+  plan_id: string;
+  race_id: string;
+  agent_name: string;
+  model?: string | null;
+  plan: Plan;
+  hard_pass: number;
+  soft_scores?: { flow: number; diversity: number; vibe: number } | null;
+  total_score?: number | null;
+  rank?: number | null;
+  country_iso3?: string | null;
+  created_at?: string;
+}
+
+export interface RacePlansResponse {
+  race_id: string;
+  plans: RacePlan[];
+  count: number;
+}
+
 export interface Rating {
   novelty: number;
   efficiency: number;
@@ -323,6 +365,7 @@ export interface Alternative {
   avg_cost_sgd?: number;
   dietary_tags?: string[];
   tags?: string[];
+  streetview_photos?: StreetviewPhoto[];
 }
 
 export interface AlternativesResponse {

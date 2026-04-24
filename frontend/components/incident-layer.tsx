@@ -101,7 +101,7 @@ export function IncidentLayer() {
     let timer: number | null = null;
 
     const fetchAndRender = async (): Promise<void> => {
-      const url = `${API_BASE}/api/v1/traffic/incidents/circle?lat=${SINGAPORE_LAT}&lng=${SINGAPORE_LNG}&radius=${RADIUS_METRES}`;
+      const url = `${API_BASE}/grabmaps-proxy/incidents-circle?lat=${SINGAPORE_LAT}&lng=${SINGAPORE_LNG}&radius=${RADIUS_METRES}`;
       try {
         const res = await fetch(url);
         if (!res.ok) return;

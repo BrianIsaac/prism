@@ -76,55 +76,99 @@ interface ArcRender {
   emphasised: boolean;
 }
 
-interface ToolPayloadInput {
+interface ToolArgBag {
   lat?: number;
   lng?: number;
-  origin?: { lat?: number; lng?: number };
-  destination?: { lat?: number; lng?: number };
+  near_lat?: number;
+  near_lng?: number;
+  origin_lat?: number;
+  origin_lng?: number;
+  dest_lat?: number;
+  dest_lng?: number;
+  origin?: { lat?: number; lng?: number } | [number, number];
+  destination?: { lat?: number; lng?: number } | [number, number];
+  origins?: Array<{ lat?: number; lng?: number } | [number, number]>;
   thumbnail_url?: string;
   thumb_url?: string;
 }
 
-interface ToolPayloadOutput {
+interface ToolPayload {
+  tool?: string;
   lat?: number;
   lng?: number;
-  thumbnail_url?: string;
   thumb_url?: string;
-  url?: string;
+  thumbnail_url?: string;
+  args?: ToolArgBag;
+  input?: ToolArgBag;
+  output?: { lat?: number; lng?: number; thumbnail_url?: string; thumb_url?: string; url?: string };
 }
 
+/**
+ * Resolve a coordinate pair from a ``tool_call`` or ``tool_result`` payload.
+ *
+ * The backend's `call_tool_with_budget` stamps ``payload.lat`` /
+ * ``payload.lng`` at the top level when a coord is extractable; this is
+ * the preferred source. Older-shape payloads carry the args under
+ * ``payload.args`` (and sometimes ``payload.input``), which we fall
+ * through to. Per-tool key variants handled:
+ *
+ *   - ``lat`` / ``lng``                    — nearby_search, reverse_geocode,
+ *                                            get_traffic, get_incidents,
+ *                                            get_street_view
+ *   - ``near_lat`` / ``near_lng``          — places_search
+ *   - ``origin_lat`` / ``origin_lng``      — route (falls back to dest_*)
+ *   - ``origins[0].lat/.lng``              — route_matrix
+ */
 function extractLatLng(
-  payload: { input?: Record<string, unknown>; output?: unknown } | undefined,
+  payload: ToolPayload | undefined,
 ): { lat: number; lng: number } | null {
-  const input = payload?.input as ToolPayloadInput | undefined;
-  if (
-    input &&
-    typeof input.lat === "number" &&
-    typeof input.lng === "number"
-  ) {
-    return { lat: input.lat, lng: input.lng };
+  if (!payload) return null;
+  if (typeof payload.lat === "number" && typeof payload.lng === "number") {
+    return { lat: payload.lat, lng: payload.lng };
   }
-  const dest = input?.destination;
-  if (
-    dest &&
-    typeof dest.lat === "number" &&
-    typeof dest.lng === "number"
-  ) {
-    return { lat: dest.lat, lng: dest.lng };
-  }
-  const out = payload?.output as ToolPayloadOutput | undefined;
+  const tryBag = (bag: ToolArgBag | undefined): { lat: number; lng: number } | null => {
+    if (!bag) return null;
+    const latCandidate = bag.lat ?? bag.near_lat ?? bag.origin_lat ?? bag.dest_lat;
+    const lngCandidate = bag.lng ?? bag.near_lng ?? bag.origin_lng ?? bag.dest_lng;
+    if (typeof latCandidate === "number" && typeof lngCandidate === "number") {
+      return { lat: latCandidate, lng: lngCandidate };
+    }
+    const origins = bag.origins;
+    if (Array.isArray(origins) && origins.length > 0) {
+      const first = origins[0];
+      if (Array.isArray(first) && first.length >= 2) {
+        const [a, b] = first;
+        if (typeof a === "number" && typeof b === "number") {
+          return { lat: a, lng: b };
+        }
+      } else if (first && typeof (first as { lat?: unknown }).lat === "number") {
+        const o = first as { lat: number; lng: number };
+        return { lat: o.lat, lng: o.lng };
+      }
+    }
+    const dest = bag.destination;
+    if (dest && !Array.isArray(dest) && typeof dest.lat === "number" && typeof dest.lng === "number") {
+      return { lat: dest.lat, lng: dest.lng };
+    }
+    return null;
+  };
+  const fromArgs = tryBag(payload.args) ?? tryBag(payload.input);
+  if (fromArgs) return fromArgs;
+  const out = payload.output;
   if (out && typeof out.lat === "number" && typeof out.lng === "number") {
     return { lat: out.lat, lng: out.lng };
   }
   return null;
 }
 
-function extractThumbnail(payload: {
-  input?: Record<string, unknown>;
-  output?: unknown;
-}): string | undefined {
-  const out = payload.output as ToolPayloadOutput | undefined;
-  return out?.thumbnail_url ?? out?.thumb_url ?? out?.url;
+function extractThumbnail(payload: ToolPayload): string | undefined {
+  return (
+    payload.thumb_url ??
+    payload.thumbnail_url ??
+    payload.output?.thumbnail_url ??
+    payload.output?.thumb_url ??
+    payload.output?.url
+  );
 }
 
 function pulseScaleForTool(tool: string): number {
@@ -214,16 +258,11 @@ export function AgentStreamOverlay({
       const ageMs = baseTime - ev.t_ms;
 
       if (ev.type === "tool_call" || ev.type === "tool_result") {
-        const point = extractLatLng(
-          ev.payload as {
-            input?: Record<string, unknown>;
-            output?: unknown;
-          },
-        );
+        const payload = ev.payload as unknown as ToolPayload;
+        const point = extractLatLng(payload);
         if (!point) continue;
         const proj = project(point.lat, point.lng);
-        const tool =
-          (ev.payload as { tool?: string }).tool?.toString() ?? "unknown";
+        const tool = payload.tool ?? "unknown";
         cursors[agent] = { agent, x: proj.x, y: proj.y, colour };
         if (ageMs <= PULSE_DURATION_MS) {
           pulses.push({
@@ -234,14 +273,7 @@ export function AgentStreamOverlay({
             age: ageMs,
             scale: pulseScaleForTool(tool),
             thumbnail:
-              ev.type === "tool_result"
-                ? extractThumbnail(
-                    ev.payload as {
-                      input?: Record<string, unknown>;
-                      output?: unknown;
-                    },
-                  )
-                : undefined,
+              ev.type === "tool_result" ? extractThumbnail(payload) : undefined,
             label: tool,
           });
         }

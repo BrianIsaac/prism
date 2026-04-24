@@ -15,7 +15,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-TransportMode = Literal["walk", "drive", "transit", "cycle"]
+TransportMode = Literal[
+    "driving",
+    "motorcycle",
+    "tricycle",
+    "cycling",
+    "walking",
+    "walk",
+    "drive",
+    "transit",
+    "cycle",
+]
 
 
 class POI(BaseModel):

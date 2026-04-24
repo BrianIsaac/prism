@@ -39,8 +39,8 @@ from app.config import (
 )
 from app.harness import HARNESS_WEIGHTS, score_plan
 from app.llm_clients import Provider, ToolCallRequest, call_llm
-from app.tools import GRABMAPS_TOOLS, GRABMAPS_TOOL_SCHEMA
-from app.tools.base import call_tool_with_budget
+from app.tools import GRABMAPS_TOOL_SCHEMA
+from app.tools.base import Budget, ToolBudgetExceeded, call_tool_with_budget
 
 # Minimum wall-clock slack (seconds) required before the ratchet fires
 # another LLM turn. Gemini 3.1 Pro routinely consumes 90-150s per thinking
@@ -177,72 +177,6 @@ def _extract_poi_ids(result: Any) -> list[str]:
     return ids
 
 
-def _summarise_tool_result(tool_name: str, result: Any) -> str:
-    """Render a one-line summary of a tool result for the SSE ``tool_result`` event.
-
-    Keeps the SSE payload small and human-readable; the raw JSON goes back
-    to the model via the ``tool`` message, not the event stream.
-    """
-    if isinstance(result, dict) and result.get("error"):
-        return f"error: {str(result['error'])[:120]}"
-    if tool_name in ("places_search", "nearby_search"):
-        if isinstance(result, dict):
-            items = result.get("places") or result.get("results") or []
-            return f"{len(items)} places"
-    if tool_name == "route":
-        if isinstance(result, dict):
-            routes = result.get("routes") or []
-            if routes:
-                dur = routes[0].get("duration_s") or routes[0].get("duration_seconds") or 0
-                dist = routes[0].get("distance_m") or routes[0].get("distance_metres") or 0
-                return f"route {int(dist)}m / {int(dur)}s"
-    if tool_name == "route_matrix":
-        if isinstance(result, dict):
-            matrix = result.get("matrix") or result.get("routes") or []
-            return f"matrix {len(matrix)} rows"
-    if tool_name in ("get_traffic", "get_incidents"):
-        if isinstance(result, dict):
-            items = result.get("items") or result.get("results") or result.get("incidents") or []
-            return f"{len(items)} items"
-    if tool_name == "get_street_view":
-        if isinstance(result, dict):
-            photos = result.get("photos") or result.get("items") or []
-            return f"{len(photos)} photos"
-    if tool_name == "reverse_geocode":
-        if isinstance(result, dict):
-            place = result.get("place") or {}
-            return str(place.get("formatted_address") or place.get("name") or "")[:120]
-    return "ok"
-
-
-def _extract_coords(args: dict[str, Any]) -> tuple[float | None, float | None]:
-    """Pull a best-effort ``(lat, lng)`` out of tool arguments for canvas overlays."""
-    lat = args.get("lat") or args.get("near_lat")
-    lng = args.get("lng") or args.get("near_lng")
-    if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-        return float(lat), float(lng)
-    origin = args.get("origin")
-    if isinstance(origin, (list, tuple)) and len(origin) >= 2:
-        try:
-            return float(origin[0]), float(origin[1])
-        except (TypeError, ValueError):
-            return None, None
-    return None, None
-
-
-def _extract_thumb_url(tool_name: str, result: Any) -> str | None:
-    """Pull the first photo thumbnail URL out of a ``get_street_view`` result."""
-    if tool_name != "get_street_view" or not isinstance(result, dict):
-        return None
-    photos = result.get("photos") or result.get("items") or []
-    if not isinstance(photos, list) or not photos:
-        return None
-    first = photos[0]
-    if not isinstance(first, dict):
-        return None
-    return first.get("thumb_url") or first.get("thumbUrl") or first.get("fileUrl")
-
-
 async def _emit(
     emitter: EventEmitter | None,
     event_type: str,
@@ -292,7 +226,12 @@ async def run_agent(
     Raises:
         asyncio.CancelledError: If the race deadline cancels this coroutine.
     """
-    budget = {"remaining": TOOL_BUDGET_PER_AGENT}
+    # ``Budget`` is the dataclass accepted by ``call_tool_with_budget`` —
+    # using a plain dict here used to cause a silent ``TypeError`` on every
+    # tool call because the wrapper expected ``budget.remaining``. The
+    # dataclass also owns the in-place decrement so we do not double-count
+    # against the 40-call ceiling from the caller side.
+    budget = Budget(remaining=TOOL_BUDGET_PER_AGENT)
     # Every POI id the agent has seen from real tool results. Used to catch
     # fabricated POIs before they enter the harness.
     seen_poi_ids: set[str] = set()
@@ -371,7 +310,7 @@ async def run_agent(
                 )
                 continue
 
-            if budget["remaining"] <= 0:
+            if budget.remaining <= 0:
                 messages.append(
                     {
                         "role": "tool",
@@ -387,43 +326,42 @@ async def run_agent(
                 )
                 return await _force_final_answer(agent, messages, seen_poi_ids)
 
-            tool_fn = GRABMAPS_TOOLS.get(tool_call.name)
-            if tool_fn is None:
+            # ``call_tool_with_budget`` owns budget accounting, trace
+            # persistence, and the ``tool_call`` + ``tool_result`` SSE
+            # emits. The caller only observes the final value (or catches
+            # the raised exception for error-path bookkeeping).
+            try:
+                result = await call_tool_with_budget(
+                    agent_name=agent.name,
+                    tool_name=tool_call.name,
+                    args=tool_call.arguments,
+                    race_id=race_id or "",
+                    budget=budget,
+                    event_emitter=event_emitter,
+                )
+            except ToolBudgetExceeded:
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": tool_call.name,
                         "content": json.dumps(
-                            {"error": f"unknown tool: {tool_call.name}"}
+                            {
+                                "error": "BUDGET_EXHAUSTED",
+                                "message": (
+                                    "Produce a final plan now with the "
+                                    "information you have."
+                                ),
+                            }
                         ),
                     }
                 )
-                continue
-
-            lat, lng = _extract_coords(tool_call.arguments)
-            await _emit(
-                event_emitter,
-                "tool_call",
-                {
-                    "tool": tool_call.name,
-                    "args": tool_call.arguments,
-                    **({"lat": lat} if lat is not None else {}),
-                    **({"lng": lng} if lng is not None else {}),
-                },
-            )
-
-            try:
-                result, _trace = await call_tool_with_budget(
-                    tool_name=tool_call.name,
-                    agent_name=agent.name,
-                    tool_fn=tool_fn,
-                    tool_args=tool_call.arguments,
-                    budget_remaining=budget["remaining"],
-                    race_id=race_id,
-                    sse_emit=event_emitter,
-                )
+                return await _force_final_answer(agent, messages, seen_poi_ids)
             except Exception as exc:  # noqa: BLE001
+                # The wrapper still wrote a trace row + emitted
+                # ``tool_result`` with the error status in its ``finally``
+                # block; here we just hand the error back to the model so
+                # it can reason about the failure.
                 err_payload = {"error": f"{type(exc).__name__}: {exc}"}
                 messages.append(
                     {
@@ -433,40 +371,12 @@ async def run_agent(
                         "content": json.dumps(err_payload),
                     }
                 )
-                await _emit(
-                    event_emitter,
-                    "tool_result",
-                    {
-                        "tool": tool_call.name,
-                        "summary": f"error: {type(exc).__name__}",
-                    },
-                )
-                # The call_tool_with_budget wrapper decrements the budget on
-                # success only; on the exception path the decrement is the
-                # caller's responsibility so a failing call still counts
-                # against the 40-call ceiling (otherwise a flaky tool could
-                # spin forever).
-                budget["remaining"] -= 1
                 continue
 
-            budget["remaining"] -= 1
             for pid in _extract_poi_ids(result):
                 seen_poi_ids.add(pid)
 
-            thumb_url = _extract_thumb_url(tool_call.name, result)
-            await _emit(
-                event_emitter,
-                "tool_result",
-                {
-                    "tool": tool_call.name,
-                    "summary": _summarise_tool_result(tool_call.name, result),
-                    **({"lat": lat} if lat is not None else {}),
-                    **({"lng": lng} if lng is not None else {}),
-                    **({"thumb_url": thumb_url} if thumb_url else {}),
-                },
-            )
-
-            if tool_call.name in ("route",):
+            if tool_call.name == "route":
                 await _emit_arc_from_route(event_emitter, tool_call.arguments, result)
 
             messages.append(
@@ -480,7 +390,7 @@ async def run_agent(
                 }
             )
 
-        if budget["remaining"] <= 0:
+        if budget.remaining <= 0:
             return await _force_final_answer(agent, messages, seen_poi_ids)
 
 
@@ -517,45 +427,44 @@ async def _emit_arc_from_route(
 ) -> None:
     """Emit a single ``arc`` event for a ``route`` tool result.
 
-    Arc payload uses ``[lng, lat]`` order (GeoJSON convention) while the
-    tool belt speaks ``[lat, lng]``. The emitter normalises on the way out.
+    Reads ``origin_lat`` / ``origin_lng`` / ``dest_lat`` / ``dest_lng`` from
+    the tool call arguments (the v2 ``route`` schema; see
+    :mod:`app.tools.grabmaps`) and pairs them with the top-level
+    ``duration`` returned by GrabMaps ``/direction``
+    (``grabmaps_api_reference.md §Routing``). Arc payload uses ``[lng, lat]``
+    (GeoJSON convention); the caller's canvas converts as needed.
     """
     if emitter is None:
         return
-    origin = args.get("origin")
-    destination = args.get("destination")
+    try:
+        origin_lat = float(args["origin_lat"])
+        origin_lng = float(args["origin_lng"])
+        dest_lat = float(args["dest_lat"])
+        dest_lng = float(args["dest_lng"])
+    except (KeyError, TypeError, ValueError):
+        return
     profile = str(args.get("profile", "walking"))
     duration = 0.0
     if isinstance(result, dict):
         routes = result.get("routes") or []
-        if isinstance(routes, list) and routes:
-            first = routes[0] if isinstance(routes[0], dict) else {}
+        if isinstance(routes, list) and routes and isinstance(routes[0], dict):
+            first = routes[0]
             duration = float(
-                first.get("duration_s")
+                first.get("duration")
+                or first.get("duration_s")
                 or first.get("duration_seconds")
                 or 0.0
             )
-    if (
-        isinstance(origin, (list, tuple))
-        and len(origin) >= 2
-        and isinstance(destination, (list, tuple))
-        and len(destination) >= 2
-    ):
-        try:
-            arc_from = [float(origin[1]), float(origin[0])]
-            arc_to = [float(destination[1]), float(destination[0])]
-        except (TypeError, ValueError):
-            return
-        await _emit(
-            emitter,
-            "arc",
-            {
-                "from": arc_from,
-                "to": arc_to,
-                "mode": profile,
-                "duration_s": duration,
-            },
-        )
+    await _emit(
+        emitter,
+        "arc",
+        {
+            "from": [origin_lng, origin_lat],
+            "to": [dest_lng, dest_lat],
+            "mode": profile,
+            "duration_s": duration,
+        },
+    )
 
 
 # ---------- Assistant-message helper (preserves thought_signature) ----------
